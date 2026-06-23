@@ -278,7 +278,7 @@ def main():
     accelerator = "cpu" if args.simulator == "mujoco" else "gpu"
     fabric_config = FabricConfig(
         accelerator=accelerator,
-        devices=1,
+        devices=[0],  # pin inference to GPU 0 (use CUDA_VISIBLE_DEVICES=N to remap)
         num_nodes=1,
         loggers=[],  # No loggers needed for inference
         callbacks=[],  # No callbacks needed for inference

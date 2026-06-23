@@ -57,6 +57,7 @@ Key Features:
 
 """
 
+import math
 from functools import cached_property
 from typing import Any, Dict, Optional, TYPE_CHECKING, Tuple
 
@@ -173,6 +174,12 @@ class BaseEnv:
         self.motion_lib = motion_lib
         self.simulator = simulator
         self.num_envs = simulator.num_envs
+
+        # Pre-rotate all motion data to a fixed heading.
+        if self.config.fixed_spawn_yaw_deg is not None:
+            self.motion_lib.rotate_all_motions_yaw(
+                math.radians(self.config.fixed_spawn_yaw_deg)
+            )
 
         self.max_episode_length = self.config.max_episode_length
 
@@ -509,9 +516,16 @@ class BaseEnv:
 
         if non_scene_mask.any():
             num_non_scene = non_scene_mask.sum().item()
-            respawn_position_xy = self.terrain.sample_valid_locations(
-                num_envs=num_non_scene, sample_flat=sample_flat
-            )
+            if self.config.fixed_spawn_xy is not None:
+                # Spawn all non-scene envs at a user-specified fixed XY (terrain
+                # world coords, meters). Z is still terrain-height corrected below.
+                respawn_position_xy = torch.tensor(
+                    self.config.fixed_spawn_xy, device=self.device, dtype=torch.float
+                ).expand(num_non_scene, 2)
+            else:
+                respawn_position_xy = self.terrain.sample_valid_locations(
+                    num_envs=num_non_scene, sample_flat=sample_flat
+                )
 
             if ref_state is None:
                 ref_root = torch.zeros((num_non_scene, 2), device=self.device)

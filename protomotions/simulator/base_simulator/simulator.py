@@ -423,7 +423,8 @@ class Simulator(RecordingMixin, ABC):
         """
         if not hasattr(self, "_proj_config"):
             self._proj_config = (
-                getattr(self.config, "projectile", None) or ProjectileConfig()
+                # getattr(self.config, "projectile", None) or ProjectileConfig()
+                getattr(self.config, "projectile", None) or ProjectileConfig(num_projectiles=0)
             )
         return self._proj_config
 

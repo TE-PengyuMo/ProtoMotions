@@ -63,6 +63,14 @@ class EnvConfig:
         default=0.05,
         metadata={"help": "Height offset for respawning relative to reference.", "min": 0.0}
     )
+    fixed_spawn_xy: Optional[list] = field(
+        default=None,
+        metadata={"help": "[x, y] world coords (m): spawn all non-scene envs here. Z still terrain-corrected."}
+    )
+    fixed_spawn_yaw_deg: Optional[float] = field(
+        default=None,
+        metadata={"help": "Yaw (deg, CCW) to rotate all motions about Z at load time. Composes with fixed_spawn_xy."}
+    )
     ref_object_respawn_offset: float = field(
         default=0.0,
         metadata={"help": "Height offset for object respawning."}

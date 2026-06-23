@@ -31,6 +31,7 @@ Key Features:
 """
 
 import logging
+import math
 import os
 import re
 from typing import Optional, Tuple
@@ -44,7 +45,7 @@ from protomotions.simulator.base_simulator.simulator_state import (
     RobotState,
     StateConversion,
 )
-from protomotions.utils.rotations import quat_to_exp_map
+from protomotions.utils.rotations import quat_to_exp_map, quat_mul
 from dataclasses import dataclass, field
 
 from protomotions.utils.motion_interpolation_utils import (
@@ -625,6 +626,41 @@ class MotionLib:
                 "Discarding contacts — any component reading ref contacts will error."
             )
             self.contacts = None
+
+    def rotate_all_motions_yaw(self, yaw_rad: float):
+        """Rotate all motion data about the world Z axis by ``yaw_rad`` (radians, CCW).
+
+        Applied in-place to global translations, rotations and velocities so that
+        every downstream consumer (reset state, mimic reference poses, observations)
+        sees the rotated motion consistently. Rotation is about the world origin.
+
+        Assumes all envs share a single heading (intended for inference).
+
+        Args:
+            yaw_rad: Yaw angle in radians (CCW about world Z) to rotate all motions by.
+        """
+        if self.num_motions() == 0:
+            return
+
+        c = math.cos(yaw_rad)
+        s = math.sin(yaw_rad)
+
+        def _rot_xy(t):
+            x = t[..., 0].clone()
+            y = t[..., 1].clone()
+            t[..., 0] = c * x - s * y
+            t[..., 1] = s * x + c * y
+
+        _rot_xy(self.gts)
+        _rot_xy(self.gvs)
+        _rot_xy(self.gavs)
+
+        yaw_q = torch.tensor(
+            [0.0, 0.0, math.sin(yaw_rad / 2.0), math.cos(yaw_rad / 2.0)],
+            device=self.grs.device,
+            dtype=self.grs.dtype,
+        ).expand_as(self.grs)
+        self.grs = quat_mul(yaw_q, self.grs, w_last=True)
 
     def smooth_contacts(self, window_size: int):
         """

@@ -92,8 +92,10 @@ Example
 
 from __future__ import annotations
 
+import importlib
 from typing import Any, Callable, Dict, TYPE_CHECKING
 
+import torch
 from torch import Tensor
 
 from protomotions.envs.context_paths import FieldPath, resolve_path
@@ -163,7 +165,34 @@ class MdpComponent:
         self.dynamic_vars = dynamic_vars
         self.static_params = static_params or {}
         self._device_ready = False
-    
+
+    def __getstate__(self):
+        """Make MdpComponent picklable even when compute_func is a
+        torch.jit.ScriptFunction (some torch versions cannot pickle these).
+
+        Stores a re-importable reference (module, name) derived from the jit
+        function's qualified_name; restored on unpickle. Plain Python callables
+        are pickled as-is.
+        """
+        state = self.__dict__.copy()
+        fn = state.get("compute_func")
+        if isinstance(fn, torch.jit.ScriptFunction):
+            # qualified_name looks like "__torch__.<module path>.<func name>"
+            module_path, _, fn_name = fn.qualified_name.replace(
+                "__torch__.", ""
+            ).rpartition(".")
+            state["compute_func"] = ("__scriptfn_ref__", module_path, fn_name)
+        return state
+
+    def __setstate__(self, state):
+        fn = state.get("compute_func")
+        if isinstance(fn, tuple) and len(fn) == 3 and fn[0] == "__scriptfn_ref__":
+            _, module_path, fn_name = fn
+            state["compute_func"] = getattr(
+                importlib.import_module(module_path), fn_name
+            )
+        self.__dict__.update(state)
+
     def resolve_args(self, ctx: "EnvContext") -> tuple:
         """Resolve dynamic_vars from context and prepare func params.
 

@@ -13,7 +13,9 @@ exps/*
 **/.DS_Store
 wandb/*
 newton_source/*
-data/amass/*.pkl
+data/
+isaacgym/
+isaac-gym-preview-4
 .claude/*
 !.claude/commands/
 .cursor/

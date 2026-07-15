@@ -46,9 +46,9 @@ parser.add_argument(
 parser.add_argument(
     "--robot",
     type=str,
-    choices=["g1", "rigv1", "h1_2", "smpl", "soma23"],
+    choices=["g1", "rigv1", "h1_2", "smpl", "soma23", "3dmmx"],
     default="g1",
-    help="Robot to load (g1, rigv1, h1_2, smpl, or soma23)",
+    help="Robot to load (g1, rigv1, h1_2, smpl, soma23, or 3dmmx)",
 )
 parser.add_argument("--headless", action="store_true", help="Run in headless mode")
 parser.add_argument(
@@ -150,6 +150,9 @@ ROBOT_SPECS = {
         viz_bodies=[],
     ),
     "soma23": RobotSpec(
+        viz_bodies=[],
+    ),
+    "3dmmx": RobotSpec(
         viz_bodies=[],
     ),
 }
@@ -514,17 +517,17 @@ class MotionVisualizerSmoothness:
         ]
 
         # Add the body markers to the existing visualization markers
-        self.viz_markers[self.joint_marker_name] = VisualizationMarkerConfig(
-            type="sphere",
-            color=(1.0, 1.0, 0.0),  # yellow
-            markers=joint_marker_configs,
-        )
+        # self.viz_markers[self.joint_marker_name] = VisualizationMarkerConfig(
+        #     type="sphere",
+        #     color=(1.0, 1.0, 0.0),  # yellow
+        #     markers=joint_marker_configs,
+        # )
 
-        self.viz_markers[self.contact_marker_name] = VisualizationMarkerConfig(
-            type="sphere",
-            color=(0.8, 0.0, 0.8),  # purple
-            markers=contact_marker_configs,
-        )
+        # self.viz_markers[self.contact_marker_name] = VisualizationMarkerConfig(
+        #     type="sphere",
+        #     color=(0.8, 0.0, 0.8),  # purple
+        #     markers=contact_marker_configs,
+        # )
 
     def _switch_to_next_motion(self):
         """Switch to the next motion in the dataset"""
@@ -829,13 +832,13 @@ class MotionVisualizerSmoothness:
             translation=all_positions, orientation=all_orientations
         )
 
-        # Add/update joint highlight markers
-        joint_marker_states = self._update_joint_highlights()
-        marker_states.update(joint_marker_states)
+        # # Add/update joint highlight markers (yellow)
+        # joint_marker_states = self._update_joint_highlights()
+        # marker_states.update(joint_marker_states)
 
-        # Add/update contact markers
-        contact_marker_states = self._update_contact_markers()
-        marker_states.update(contact_marker_states)
+        # # Add/update contact markers (purple)
+        # contact_marker_states = self._update_contact_markers()
+        # marker_states.update(contact_marker_states)
 
         return marker_states
 

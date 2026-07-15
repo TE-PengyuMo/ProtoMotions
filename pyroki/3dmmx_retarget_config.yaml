@@ -1,0 +1,23 @@
+# Retarget config: Sergey/Sony mocap -> 3dmmx humanoid.
+# Usage:  --config pyroki/3dmmx_retarget_config.yaml 
+
+# --- foot quality ---
+foot_flat: 0.3          # always-on foot-flat prior (low -> keeps swing ankle ROM)
+foot_tilt: 8.0          # contact-gated foot-flat (less toe-up in stance)
+joint_smooth: 5.0       # joint smoothness (low -> fast toe-off plantarflexion)
+toe_out: 12.0           # source-toe yaw splay deg (duck stance, never pigeon)
+foot_twist_rate: 10.0   # airborne swing-foot twist-rate smoother (gauge DOF)
+foot_sagittal: 10.0     # airborne sole-sagittal anchor (kills sideways sole lean)
+
+# --- whole-body match weights ---
+ee_weight: 2.0          # end-effector (wrist/ankle/foot) match
+arm_narrow: 0.7         # pull elbow/wrist toward shoulder (less arm abduction)
+global_align: 8.0       # global keypoint-position match
+local_align: 1.0        # relative joint/keypoint match
+foot_contact: 30.0      # pin foot vel/height when in contact
+
+# --- regularizers ---
+root_smooth: 8.0        # root anti-jitter
+joint_rest: 1.0         # hold move-less joints near rest
+joint_vel_limit: 50.0   # cap joint speed
+self_collision: 0.0

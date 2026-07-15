@@ -608,15 +608,20 @@ def extract_control_info(
         # Extract actuator force range if available
         effort_limit = getattr(joint, "actuatorfrcrange", DEFAULT_EFFORT_LIMIT)
 
-        # Convert to float if they're strings (common in MJCF)
-        if isinstance(stiffness, str):
-            stiffness = float(stiffness)
-        if isinstance(damping, str):
-            damping = float(damping)
-        if isinstance(armature, str):
-            armature = float(armature)
-        if isinstance(friction, str):
-            friction = float(friction)
+        # Convert to float
+        def _scalar(v):
+            if isinstance(v, str):
+                return float(v)
+            if isinstance(v, (list, tuple)):
+                return float(v[0])
+            if isinstance(v, np.ndarray):
+                return float(v.reshape(-1)[0])
+            return v
+
+        stiffness = _scalar(stiffness)
+        damping = _scalar(damping)
+        armature = _scalar(armature)
+        friction = _scalar(friction)
         if isinstance(effort_limit, str):
             # Parse "min max" format
             try:

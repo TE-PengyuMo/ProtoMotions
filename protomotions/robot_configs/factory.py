@@ -57,6 +57,10 @@ def robot_config(robot_name: str, **updates) -> RobotConfig:
         from protomotions.robot_configs.soma23 import Soma23RobotConfig
 
         config = Soma23RobotConfig()
+    elif robot_name == "3dmmx":
+        from protomotions.robot_configs.threedmmx import ThreeDmmxRobotConfig
+
+        config = ThreeDmmxRobotConfig()
     else:
         raise ValueError(f"Invalid robot name: {robot_name}")
 

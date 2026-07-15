@@ -51,6 +51,34 @@ app = typer.Typer(pretty_exceptions_enable=False)
 """
 
 
+def _unwrap_expmap_dofs(dof: torch.Tensor) -> torch.Tensor:
+    """Temporally unwrap exp-map (rotation-vector) dofs for continuity.
+
+    dof: (T, 3*J), each triple = one 3-DOF joint's rotation vector. Since
+    theta*axis == (theta + 2*pi*k)*axis, pick per frame the +/-2*pi*axis shift
+    closest to the previous frame -- removes the 2*pi flips that snap playback,
+    without changing the actual rotations.
+    """
+    T = dof.shape[0]
+    d = dof.clone().reshape(T, -1, 3)  # (T, J, 3)
+    two_pi = 2.0 * np.pi
+    for t in range(1, T):
+        prev = d[t - 1]  # (J, 3)
+        cur = d[t]  # (J, 3)
+        theta = cur.norm(dim=-1, keepdim=True)  # (J, 1)
+        axis = cur / (theta + 1e-8)
+        best = cur.clone()
+        best_dist = (cur - prev).norm(dim=-1)  # (J,)
+        for k in (-2, -1, 1, 2):
+            cand = cur + (k * two_pi) * axis
+            dist = (cand - prev).norm(dim=-1)
+            mask = dist < best_dist
+            best[mask] = cand[mask]
+            best_dist[mask] = dist[mask]
+        d[t] = best
+    return d.reshape(T, -1)
+
+
 def process_csv_file(csv_path, input_fps, output_fps, device, dtype):
     """
     Process a CSV file and extract motion data.
@@ -238,10 +266,17 @@ def main(
         "g1": "g1_bm_box_feet.xml",
         "h1_2": "h1_2.xml",
     }
+    # Robots whose MJCF lives outside protomotions/data/assets/mjcf/ (full paths).
+    robot_mjcf_path_override = {
+        "3dmmx": "data/Sony/3dmmx_neutral_no_fingers_eyes_light.xml",
+    }
 
     # Get kinematic info for the specified robot
-    mjcf_filename = robot_mjcf_mapping.get(robot_type, f"{robot_type}.xml")
-    mjcf_path = f"protomotions/data/assets/mjcf/{mjcf_filename}"
+    if robot_type in robot_mjcf_path_override:
+        mjcf_path = robot_mjcf_path_override[robot_type]
+    else:
+        mjcf_filename = robot_mjcf_mapping.get(robot_type, f"{robot_type}.xml")
+        mjcf_path = f"protomotions/data/assets/mjcf/{mjcf_filename}"
     if not os.path.exists(mjcf_path):
         raise FileNotFoundError(f"MJCF file not found at {mjcf_path}")
 
@@ -322,29 +357,54 @@ def main(
                 velocity_max_horizon=3,  # Use multi-horizon minimum for noise-filtered velocities
             )
 
-            # to ensure joint angles falls into [-pi, pi]
-            # otherwise we can simply use the joint angles as dof_pos
-            qpos = extract_qpos_from_transforms(
-                kinematic_info, root_pos, joint_rot_mats
-            )
-            motion.dof_pos = qpos[:, 7:]
+            if robot_type == "3dmmx":
+                # IsaacLab merges each body's 3 hinges into one D6 joint with an
+                # exp_map (rotation-vector) dof convention, so decompose the joint
+                # rotation matrices with 'exp_map'. Do NOT reuse the raw pyroki
+                # stacked-hinge angles: they match sequential-euler, not exp_map,
+                # and fold the limbs in IsaacLab on large rotations.
+                qpos = extract_qpos_from_transforms(
+                    kinematic_info,
+                    root_pos,
+                    joint_rot_mats,
+                    multi_dof_decomposition_method="exp_map",
+                )
+                # exp_map is per-frame and jumps by 2*pi*axis when a joint wraps
+                # near +/-pi, so dof_pos would snap on playback. Store the MINIMAL
+                # exp-map (|v|<=pi) as dof_pos -- the unwrapped version pushes dofs
+                # past the +/-pi joint limits and IsaacLab clamps them (dislocates);
+                # use the unwrapped (continuous) version only for smooth velocities.
+                unwrapped = _unwrap_expmap_dofs(qpos[:, 7:])
+                motion.dof_pos = qpos[:, 7:]
+                dof_vel = compute_cartesian_velocity(
+                    batched_robot_pos=unwrapped.unsqueeze(1),
+                    fps=output_fps,
+                )
+                motion.dof_vel = dof_vel.squeeze(1)
+            else:
+                # to ensure joint angles falls into [-pi, pi]
+                # otherwise we can simply use the joint angles as dof_pos
+                qpos = extract_qpos_from_transforms(
+                    kinematic_info, root_pos, joint_rot_mats
+                )
+                motion.dof_pos = qpos[:, 7:]
 
-            allowed_delta = [0.0, 2 * np.pi, 4 * np.pi]
+                allowed_delta = [0.0, 2 * np.pi, 4 * np.pi]
 
-            # Allow epsilon error in the difference between qpos and joint_angles
-            delta = (qpos[:, 7:] - joint_angles).abs()
-            epsilon = 1e-4
-            # For each element, check if it is close to any allowed_delta (within epsilon)
-            allowed = torch.zeros_like(delta, dtype=torch.bool)
-            for d in allowed_delta:
-                allowed |= (delta - d).abs() < epsilon
-            assert allowed.all(), "qpos and joint_angles are not allowed (exceeds allowed delta with epsilon tolerance)"
+                # Allow epsilon error in the difference between qpos and joint_angles
+                delta = (qpos[:, 7:] - joint_angles).abs()
+                epsilon = 1e-4
+                # For each element, check if it is close to any allowed_delta (within epsilon)
+                allowed = torch.zeros_like(delta, dtype=torch.bool)
+                for d in allowed_delta:
+                    allowed |= (delta - d).abs() < epsilon
+                assert allowed.all(), "qpos and joint_angles are not allowed (exceeds allowed delta with epsilon tolerance)"
 
-            dof_vel = compute_cartesian_velocity(
-                batched_robot_pos=joint_angles.unsqueeze(1),
-                fps=output_fps,
-            )
-            motion.dof_vel = dof_vel.squeeze(1)
+                dof_vel = compute_cartesian_velocity(
+                    batched_robot_pos=joint_angles.unsqueeze(1),
+                    fps=output_fps,
+                )
+                motion.dof_vel = dof_vel.squeeze(1)
 
             # motion.fix_height(height_offset=0.04)
 
@@ -359,7 +419,7 @@ def main(
                 vel_delta[:-1] = (translation_vecs[1:] - translation_vecs[:-1]).unsqueeze(1) / motion.motion_dt
                 motion.rigid_body_vel = motion.rigid_body_vel + vel_delta
             
-            motion.fix_height(height_offset=0.04)
+            motion.fix_height(height_offset=0.01)
 
             # Handle contact labels
             if contact_labels_dir is not None:

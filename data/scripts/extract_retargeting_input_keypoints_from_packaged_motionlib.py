@@ -136,9 +136,10 @@ def main(
         print(f"Error: Input must be a .pt file. Got: {packaged_motion_lib_file}")
         raise typer.Exit(code=1)
 
-    if skeleton_format not in ["rigv1", "smpl"]:
+    if skeleton_format not in ["rigv1", "smpl", "sergey"]:
         print(
-            f"Error: skeleton_format must be 'rigv1' or 'smpl'. Got: {skeleton_format}"
+            f"Error: skeleton_format must be 'rigv1', 'smpl', or 'sergey'. "
+            f"Got: {skeleton_format}"
         )
         raise typer.Exit(code=1)
 
@@ -240,8 +241,6 @@ def main(
                 conceptual_keypoint_names=conceptual_keypoint_names,
                 device=device,
                 skeleton_format=skeleton_format,
-                flat_feet=True,
-                aux_points=True,
                 contacts=contacts_current_motion,
                 kinematic_info=kinematic_info,
             )

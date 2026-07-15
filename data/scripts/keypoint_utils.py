@@ -53,6 +53,30 @@ KEYPOINT_MAPPING_SMPL = {
     "right_wrist": "R_Wrist",
 }
 
+KEYPOINT_MAPPING_SERGEY = {
+    "pelvis": "Sergey_Hips",
+    "left_hip": "Sergey_LeftUpLeg",
+    "right_hip": "Sergey_RightUpLeg",
+    "left_knee": "Sergey_LeftLeg",
+    "right_knee": "Sergey_RightLeg",
+    "left_ankle": "Sergey_LeftFoot",
+    "right_ankle": "Sergey_RightFoot",
+    "left_foot": "Sergey_LeftToeBase",
+    "right_foot": "Sergey_RightToeBase",
+    "left_shoulder": "Sergey_LeftArm",
+    "right_shoulder": "Sergey_RightArm",
+    "left_elbow": "Sergey_LeftForeArm",
+    "right_elbow": "Sergey_RightForeArm",
+    "left_wrist": "Sergey_LeftHand",
+    "right_wrist": "Sergey_RightHand",
+    "left_clavicle": "Sergey_LeftShoulder",
+    "right_clavicle": "Sergey_RightShoulder",
+    "spine": "Sergey_Spine",
+    "chest": "Sergey_Spine1",
+    "neck": "Sergey_Neck",
+    "head": "Sergey_Head",
+}
+
 
 def get_keypoint_indices(
     kinematic_info, skeleton_format: str = "rigv1"
@@ -68,9 +92,12 @@ def get_keypoint_indices(
         mapping = KEYPOINT_MAPPING_RIGV1
     elif skeleton_format == "smpl":
         mapping = KEYPOINT_MAPPING_SMPL
+    elif skeleton_format == "sergey":
+        mapping = KEYPOINT_MAPPING_SERGEY
     else:
         raise ValueError(
-            f"Unsupported skeleton format: {skeleton_format}. Must be 'rigv1' or 'smpl'"
+            f"Unsupported skeleton format: {skeleton_format}. "
+            "Must be 'rigv1', 'smpl', or 'sergey'"
         )
 
     conceptual_keypoint_names = list(mapping.keys())
@@ -548,6 +575,111 @@ def extract_keypoints_from_motion_rigv1_skel(
     return result
 
 
+def extract_keypoints_from_motion_sergey_skel(
+    all_body_positions: torch.Tensor,
+    all_body_rotations_quat: torch.Tensor,
+    keypoint_indices_in_mjcf: List[int],
+    conceptual_keypoint_names: List[str],
+    device: torch.device,
+    flat_feet: bool = True,
+    aux_points: bool = True,
+    contacts: torch.Tensor = None,
+    kinematic_info=None,
+) -> Dict[str, torch.Tensor]:
+    """
+    Extracts keypoints from full-body motion data for the Sergey FBX skeleton.
+    Uses the real (FK) joint positions directly — no flat feet correction and no
+    auxiliary points (see Note). If contacts and kinematic_info are provided, also
+    extracts foot contact information.
+
+    Args:
+        all_body_positions: [T, N_bodies, 3] - body positions
+        all_body_rotations_quat: [T, N_bodies, 4] - body rotations as quaternions
+        keypoint_indices_in_mjcf: List of indices for keypoints in MJCF body order
+        conceptual_keypoint_names: List of conceptual keypoint names
+        device: torch device
+        flat_feet: Accepted for dispatcher uniformity; ignored (see Note)
+        aux_points: Accepted for dispatcher uniformity; ignored (see Note)
+        contacts: Optional [T, N_bodies] - contact labels for all bodies
+        kinematic_info: Optional kinematic info object with body_names attribute
+
+    Returns:
+        Dictionary containing:
+        - 'positions': [T, N_keypoints, 3] - keypoint positions
+        - 'orientations': [T, N_keypoints, 3, 3] - keypoint orientations as rotation matrices
+        - 'left_foot_contacts': [T, 2] - left foot contact labels (ankle, toebase) if contacts provided
+        - 'right_foot_contacts': [T, 2] - right foot contact labels (ankle, toebase) if contacts provided
+
+    Note:
+    Keypoints-first: the 21 direct keypoints (incl. real toe, spine/chest/neck/
+    head and clavicles) constrain the pose, and the retarget's foot_flat/foot_tilt
+    priors keep the soles flat, so flat feet surgery and auxiliary points are
+    redundant here and skipped.
+    """
+    # Extract keypoint positions directly
+    keypoint_positions = all_body_positions[:, keypoint_indices_in_mjcf, :]
+
+    # Extract keypoint orientations (quaternions) directly and convert to matrices
+    keypoint_orientations_quat = all_body_rotations_quat[:, keypoint_indices_in_mjcf, :]
+    keypoint_orientations_mat = quaternion_to_matrix(
+        keypoint_orientations_quat, w_last=True
+    )
+
+    result = {
+        "positions": keypoint_positions,
+        "orientations": keypoint_orientations_mat,
+    }
+
+    # Extract foot contact information if contacts and kinematic_info are provided
+    if contacts is not None and kinematic_info is not None:
+        # Find indices for foot bodies in the motion lib data
+        body_name_left_ankle = KEYPOINT_MAPPING_SERGEY["left_ankle"]
+        body_name_right_ankle = KEYPOINT_MAPPING_SERGEY["right_ankle"]
+        body_name_left_toebase = KEYPOINT_MAPPING_SERGEY["left_foot"]
+        body_name_right_toebase = KEYPOINT_MAPPING_SERGEY["right_foot"]
+        left_ankle_idx = kinematic_info.body_names.index(body_name_left_ankle)  # ankle
+        right_ankle_idx = kinematic_info.body_names.index(
+            body_name_right_ankle
+        )  # ankle
+        left_toebase_idx = kinematic_info.body_names.index(
+            body_name_left_toebase
+        )  # foot/toebase
+        right_toebase_idx = kinematic_info.body_names.index(
+            body_name_right_toebase
+        )  # foot/toebase
+
+        # Extract foot contacts: [T, 2] for each foot (ankle, toebase)
+        left_foot_contacts = contacts[:, [left_ankle_idx, left_toebase_idx]]  # [T, 2]
+        right_foot_contacts = contacts[
+            :, [right_ankle_idx, right_toebase_idx]
+        ]  # [T, 2]
+
+        # Convert to binary (0 or 1) format
+        left_foot_contacts = left_foot_contacts.float()  # Convert bool to float
+        right_foot_contacts = right_foot_contacts.float()  # Convert bool to float
+
+        # Convert to numpy and ensure binary format
+        left_foot_contacts_np = (
+            left_foot_contacts.cpu().numpy().astype(int)
+        )  # [T, 2] - ankle, toebase (0 or 1)
+        right_foot_contacts_np = (
+            right_foot_contacts.cpu().numpy().astype(int)
+        )  # [T, 2] - ankle, toebase (0 or 1)
+
+        # Assert that contact labels are binary (only 0s and 1s)
+        assert torch.all(
+            torch.isin(torch.from_numpy(left_foot_contacts_np), torch.tensor([0, 1]))
+        ), f"Left foot contacts contain non-binary values: {torch.unique(torch.from_numpy(left_foot_contacts_np))}"
+        assert torch.all(
+            torch.isin(torch.from_numpy(right_foot_contacts_np), torch.tensor([0, 1]))
+        ), f"Right foot contacts contain non-binary values: {torch.unique(torch.from_numpy(right_foot_contacts_np))}"
+
+        result["left_foot_contacts"] = left_foot_contacts_np
+        result["right_foot_contacts"] = right_foot_contacts_np
+
+    return result
+
+
 def extract_keypoints_from_motion(
     all_body_positions: torch.Tensor,
     all_body_rotations_quat: torch.Tensor,
@@ -607,9 +739,22 @@ def extract_keypoints_from_motion(
             contacts=contacts,
             kinematic_info=kinematic_info,
         )
+    elif skeleton_format == "sergey":
+        return extract_keypoints_from_motion_sergey_skel(
+            all_body_positions=all_body_positions,
+            all_body_rotations_quat=all_body_rotations_quat,
+            keypoint_indices_in_mjcf=keypoint_indices_in_mjcf,
+            conceptual_keypoint_names=conceptual_keypoint_names,
+            device=device,
+            flat_feet=flat_feet,
+            aux_points=aux_points,
+            contacts=contacts,
+            kinematic_info=kinematic_info,
+        )
     else:
         raise ValueError(
-            f"Unsupported skeleton format: {skeleton_format}. Must be 'rigv1' or 'smpl'"
+            f"Unsupported skeleton format: {skeleton_format}. "
+            "Must be 'rigv1', 'smpl', or 'sergey'"
         )
 
 
@@ -627,7 +772,10 @@ def get_mjcf_path(skeleton_format: str) -> str:
         return "protomotions/data/assets/mjcf/rigv1_humanoid.xml"
     elif skeleton_format == "smpl":
         return "protomotions/data/assets/mjcf/smpl_humanoid.xml"  # Update this path as needed
+    elif skeleton_format == "sergey":
+        return "data/Sony/sergey_humanoid.xml"
     else:
         raise ValueError(
-            f"Unsupported skeleton format: {skeleton_format}. Must be 'rigv1' or 'smpl'"
+            f"Unsupported skeleton format: {skeleton_format}. "
+            "Must be 'rigv1', 'smpl', or 'sergey'"
         )

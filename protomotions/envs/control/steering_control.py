@@ -274,10 +274,22 @@ class SteeringControl(ControlComponent):
             facing_theta, heading_axis, True
         )
 
+        # Red (movement) arrow length encodes speed magnitude: longer = faster.
+        speed_ratio = (
+            self._tar_speed.view(self.env.num_envs, 1)
+            / max(float(self.config.tar_speed_max), 1e-6)
+        ).clamp(0.0, 1.0)
+        move_len = 0.2 + 0.6 * speed_ratio  # ~0.2 (stopped) .. 0.8 (max speed)
+        move_scale = torch.cat(
+            [move_len, torch.full_like(move_len, 0.1), torch.full_like(move_len, 0.1)],
+            dim=-1,
+        )
+
         return {
             "movement_markers": MarkerState(
                 translation=movement_marker_pos.view(self.env.num_envs, -1, 3),
                 orientation=movement_rot.view(self.env.num_envs, -1, 4),
+                scale=move_scale,
             ),
             "facing_markers": MarkerState(
                 translation=facing_marker_pos.view(self.env.num_envs, -1, 3),
